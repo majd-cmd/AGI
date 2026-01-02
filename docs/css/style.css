@@ -1146,3 +1146,158 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ==========================================================================
+   Memory Stats
+   ========================================================================== */
+
+.memory-stats {
+  display: flex;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) 0;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: var(--spacing-md);
+}
+
+.stat-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+}
+
+.stat-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ==========================================================================
+   Trigger Score Levels
+   ========================================================================== */
+
+.trigger-tag.score-high {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(99, 102, 241, 0.2));
+  border-color: var(--accent-primary);
+}
+
+.trigger-tag.score-high .trigger-word {
+  color: var(--accent-primary);
+}
+
+.trigger-tag.score-medium {
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.trigger-tag.score-medium .trigger-word {
+  color: #fbbf24;
+}
+
+.trigger-tag.score-low {
+  opacity: 0.6;
+}
+
+.trigger-synonyms {
+  font-size: 0.65rem;
+  background: var(--accent-primary);
+  color: white;
+  padding: 1px 4px;
+  border-radius: var(--radius-full);
+  font-weight: 600;
+}
+
+.trigger-count {
+  font-size: 0.65rem;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  margin-left: auto;
+}
+
+/* ==========================================================================
+   Linked Triggers in Memory Detail
+   ========================================================================== */
+
+.memory-linked-triggers {
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.linked-triggers-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-sm);
+}
+
+.linked-trigger {
+  display: inline-block;
+  padding: 4px 10px;
+  background: var(--accent-gradient);
+  color: white;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.memory-detail-date {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.memory-triggers {
+  color: var(--accent-primary);
+}
+
+/* ==========================================================================
+   Notifications
+   ========================================================================== */
+
+.notification {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  padding: 12px 24px;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 500;
+  z-index: 1000;
+  opacity: 0;
+  transition: all 0.3s ease;
+  box-shadow: var(--shadow-lg);
+}
+
+.notification.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.notification-success {
+  background: var(--success);
+  color: white;
+}
+
+.notification-error {
+  background: var(--error);
+  color: white;
+}
+
+.notification-info {
+  background: var(--accent-primary);
+  color: white;
+}
