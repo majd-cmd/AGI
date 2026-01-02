@@ -1,5 +1,6 @@
 /**
  * AGI Personal Assistant - Main Application
+ * Système d'extraction automatique des informations
  */
 
 // ============================================================================
@@ -8,7 +9,7 @@
 
 const state = {
   apiKey: null,
-  triggers: [],
+  triggers: [],      // Auto-extracted keywords
   chatHistory: [],
   isTyping: false
 };
@@ -42,12 +43,12 @@ function loadState() {
   // Load API key
   state.apiKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
 
-  // Load triggers
+  // Load triggers (auto-extracted)
   try {
     const triggers = localStorage.getItem(STORAGE_KEYS.TRIGGERS);
-    state.triggers = triggers ? JSON.parse(triggers) : getDefaultTriggers();
+    state.triggers = triggers ? JSON.parse(triggers) : [];
   } catch (e) {
-    state.triggers = getDefaultTriggers();
+    state.triggers = [];
   }
 
   // Load chat history
@@ -58,18 +59,6 @@ function loadState() {
   } catch (e) {
     state.chatHistory = [];
   }
-}
-
-function getDefaultTriggers() {
-  return [
-    { word: 'important', score: 8, category: 'personnel' },
-    { word: 'souviens-toi', score: 9, category: 'personnel' },
-    { word: 'rappelle', score: 7, category: 'personnel' },
-    { word: 'projet', score: 6, category: 'professionnel' },
-    { word: 'objectif', score: 7, category: 'aspirations' },
-    { word: 'stress', score: 8, category: 'emotions' },
-    { word: 'heureux', score: 6, category: 'emotions' }
-  ];
 }
 
 function saveState() {
@@ -87,7 +76,6 @@ function setupEventListeners() {
   // Auto-resize textarea
   messageInput.addEventListener('input', () => {
     autoResizeTextarea();
-    updateTriggersPreview();
   });
 
   // Send on Enter (Shift+Enter for new line)
@@ -239,21 +227,24 @@ async function sendMessage() {
   input.value = '';
   autoResizeTextarea();
 
-  // Check for triggers and save memory if needed
-  const triggeredWords = checkTriggers(message);
-  if (triggeredWords.length > 0) {
-    const maxScore = Math.max(...triggeredWords.map(t => t.score));
-    memoryManager.addMemory(message, triggeredWords[0].category, maxScore);
-    renderMemories();
-  }
-
   // Show typing indicator
   showTypingIndicator();
 
   try {
-    const response = await callClaudeAPI(message);
+    // Run extraction and response in parallel
+    const [response, extraction] = await Promise.all([
+      callClaudeAPI(message),
+      extractInformation(message)
+    ]);
+
     hideTypingIndicator();
     addMessage('assistant', response);
+
+    // Process extraction results
+    if (extraction && extraction.important) {
+      processExtraction(extraction, message);
+    }
+
   } catch (error) {
     hideTypingIndicator();
     console.error('API Error:', error);
@@ -370,13 +361,14 @@ function renderChatHistory() {
 async function callClaudeAPI(userMessage) {
   const memories = memoryManager.getMemoriesForContext();
   const memoriesContext = memories.length > 0
-    ? `\n\nVoici ce que tu sais sur l'utilisateur:\n${memories.map(m => `- ${m.content}`).join('\n')}`
+    ? `\n\nVoici ce que tu sais sur l'utilisateur:\n${memories.map(m => `- [${m.category}] ${m.content}`).join('\n')}`
     : '';
 
   const systemPrompt = `Tu es un assistant personnel AGI bienveillant et empathique.
 Tu te souviens de tout ce que l'utilisateur te dit et tu utilises ces informations pour personnaliser tes réponses.
 Tu es français et tu parles de manière naturelle et chaleureuse.
-Tu fais attention aux émotions de l'utilisateur et tu adaptes ton ton en conséquence.${memoriesContext}`;
+Tu fais attention aux émotions de l'utilisateur et tu adaptes ton ton en conséquence.
+Quand l'utilisateur partage des informations personnelles (famille, travail, préférences, etc.), montre que tu les as notées.${memoriesContext}`;
 
   const messages = state.chatHistory.slice(-10).map(msg => ({
     role: msg.role,
@@ -411,71 +403,162 @@ Tu fais attention aux émotions de l'utilisateur et tu adaptes ton ton en consé
 }
 
 // ============================================================================
-// Triggers Management
+// Automatic Information Extraction
 // ============================================================================
 
-function checkTriggers(message) {
-  const lowerMessage = message.toLowerCase();
-  return state.triggers.filter(trigger =>
-    lowerMessage.includes(trigger.word.toLowerCase())
-  );
+async function extractInformation(message) {
+  const extractionPrompt = `Tu es un système d'extraction d'informations. Analyse le message de l'utilisateur et extrais les informations importantes à retenir.
+
+Réponds UNIQUEMENT avec un objet JSON valide (pas de texte avant ou après), avec cette structure exacte:
+{
+  "important": true/false,
+  "souvenir": "résumé concis de l'info à retenir (ou null si pas important)",
+  "categorie": "famille|travail|loisirs|sante|emotions|preferences|projets|social|autre",
+  "mots_cles": ["mot1", "mot2"],
+  "score": 1-10
 }
 
-function updateTriggersPreview() {
-  const input = document.getElementById('messageInput');
-  const preview = document.getElementById('triggersPreview');
-  const triggered = checkTriggers(input.value);
+Règles:
+- important = true si le message contient des infos personnelles, préférences, faits sur la vie de l'utilisateur
+- important = false pour les questions simples, salutations, messages sans contenu personnel
+- mots_cles = noms propres, lieux, activités, préférences mentionnées (max 5)
+- score = importance de l'information (1=trivial, 10=crucial)
+- souvenir = reformulation concise à la 3ème personne ("Il/Elle aime...", "Son frère s'appelle...")
 
-  if (triggered.length > 0) {
-    preview.textContent = `🎯 Triggers: ${triggered.map(t => t.word).join(', ')}`;
-  } else {
-    preview.textContent = '';
+Message à analyser: "${message.replace(/"/g, '\\"')}"`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': state.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 256,
+        messages: [{ role: 'user', content: extractionPrompt }]
+      })
+    });
+
+    if (!response.ok) {
+      console.error('Extraction API error');
+      return null;
+    }
+
+    const data = await response.json();
+    const text = data.content[0].text.trim();
+
+    // Parse JSON response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Extraction error:', error);
+    return null;
   }
 }
 
-function addTrigger() {
-  const wordInput = document.getElementById('newTriggerWord');
-  const scoreInput = document.getElementById('newTriggerScore');
-  const categorySelect = document.getElementById('newTriggerCategory');
-
-  const word = wordInput.value.trim().toLowerCase();
-  const score = parseInt(scoreInput.value) || 5;
-  const category = categorySelect.value;
-
-  if (!word) {
-    showNotification('Entre un mot-clé', 'error');
-    return;
+function processExtraction(extraction, originalMessage) {
+  // Add memory
+  if (extraction.souvenir) {
+    memoryManager.addMemory(
+      extraction.souvenir,
+      extraction.categorie || 'autre',
+      extraction.score || 5
+    );
+    renderMemories();
   }
 
-  if (state.triggers.find(t => t.word === word)) {
-    showNotification('Ce trigger existe déjà', 'error');
-    return;
+  // Add new keywords as triggers
+  if (extraction.mots_cles && extraction.mots_cles.length > 0) {
+    let newTriggersCount = 0;
+
+    extraction.mots_cles.forEach(keyword => {
+      const word = keyword.toLowerCase().trim();
+      if (word.length > 2 && !state.triggers.find(t => t.word === word)) {
+        state.triggers.push({
+          word: word,
+          score: extraction.score || 5,
+          category: extraction.categorie || 'autre',
+          createdAt: new Date().toISOString()
+        });
+        newTriggersCount++;
+      }
+    });
+
+    if (newTriggersCount > 0) {
+      // Keep only the 50 most recent triggers
+      state.triggers = state.triggers.slice(-50);
+      saveState();
+      renderTriggers();
+    }
   }
-
-  state.triggers.push({ word, score: Math.min(10, Math.max(1, score)), category });
-  saveState();
-  renderTriggers();
-
-  wordInput.value = '';
-  scoreInput.value = '';
-  showNotification('Trigger ajouté!', 'success');
 }
 
-function removeTrigger(word) {
-  state.triggers = state.triggers.filter(t => t.word !== word);
-  saveState();
-  renderTriggers();
-}
+// ============================================================================
+// Triggers Display (Auto-extracted)
+// ============================================================================
 
 function renderTriggers() {
   const container = document.getElementById('triggersList');
-  container.innerHTML = state.triggers.map(trigger => `
-    <div class="trigger-tag">
-      <span class="trigger-word">${trigger.word}</span>
-      <span class="trigger-score">${trigger.score}</span>
-      <button class="trigger-remove" onclick="removeTrigger('${trigger.word}')" title="Supprimer">×</button>
-    </div>
-  `).join('');
+
+  if (state.triggers.length === 0) {
+    container.innerHTML = '<p class="empty-state">Les mots-clés apparaîtront automatiquement...</p>';
+    return;
+  }
+
+  // Group triggers by category
+  const grouped = {};
+  state.triggers.forEach(trigger => {
+    const cat = trigger.category || 'autre';
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(trigger);
+  });
+
+  // Category labels and emojis
+  const categoryInfo = {
+    famille: { label: 'Famille', emoji: '👨‍👩‍👧‍👦' },
+    travail: { label: 'Travail', emoji: '💼' },
+    loisirs: { label: 'Loisirs', emoji: '🎮' },
+    sante: { label: 'Santé', emoji: '🏥' },
+    emotions: { label: 'Émotions', emoji: '💭' },
+    preferences: { label: 'Préférences', emoji: '⭐' },
+    projets: { label: 'Projets', emoji: '🎯' },
+    social: { label: 'Social', emoji: '👥' },
+    autre: { label: 'Autre', emoji: '📌' }
+  };
+
+  let html = '';
+  Object.keys(grouped).forEach(category => {
+    const info = categoryInfo[category] || { label: category, emoji: '📌' };
+    html += `<div class="trigger-category">
+      <div class="trigger-category-header">${info.emoji} ${info.label}</div>
+      <div class="trigger-category-tags">
+        ${grouped[category].map(t => `
+          <span class="trigger-tag" title="Score: ${t.score}/10">
+            <span class="trigger-word">${t.word}</span>
+          </span>
+        `).join('')}
+      </div>
+    </div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+function clearTriggers() {
+  if (confirm('Effacer tous les mots-clés détectés?')) {
+    state.triggers = [];
+    saveState();
+    renderTriggers();
+    showNotification('Mots-clés effacés', 'success');
+  }
 }
 
 // ============================================================================
@@ -484,18 +567,35 @@ function renderTriggers() {
 
 function renderMemories() {
   const container = document.getElementById('memoriesList');
-  const memories = memoryManager.getRecentMemories(10);
+  const memories = memoryManager.getRecentMemories(15);
 
   if (memories.length === 0) {
-    container.innerHTML = '<p class="empty-state">Aucun souvenir pour l\'instant...</p>';
+    container.innerHTML = '<p class="empty-state">Les souvenirs apparaîtront automatiquement quand tu partageras des infos personnelles...</p>';
     return;
   }
 
+  // Category emojis
+  const categoryEmoji = {
+    famille: '👨‍👩‍👧‍👦',
+    travail: '💼',
+    loisirs: '🎮',
+    sante: '🏥',
+    emotions: '💭',
+    preferences: '⭐',
+    projets: '🎯',
+    social: '👥',
+    autre: '📌'
+  };
+
   container.innerHTML = memories.map(memory => `
     <div class="memory-item" onclick="showMemoryDetails('${memory.id}')">
-      <div class="memory-content">${memory.content}</div>
-      <div class="memory-meta">
-        ${memory.category} • ${formatDate(memory.createdAt)}
+      <div class="memory-icon">${categoryEmoji[memory.category] || '📌'}</div>
+      <div class="memory-info">
+        <div class="memory-content">${memory.content}</div>
+        <div class="memory-meta">
+          <span class="memory-score">★ ${memory.importance}/10</span>
+          <span class="memory-date">${formatDate(memory.createdAt)}</span>
+        </div>
       </div>
     </div>
   `).join('');
@@ -505,17 +605,47 @@ function showMemoryDetails(id) {
   const memory = memoryManager.getMemoryById(id);
   if (!memory) return;
 
+  const categoryLabels = {
+    famille: 'Famille',
+    travail: 'Travail',
+    loisirs: 'Loisirs',
+    sante: 'Santé',
+    emotions: 'Émotions',
+    preferences: 'Préférences',
+    projets: 'Projets',
+    social: 'Social',
+    autre: 'Autre'
+  };
+
   const modal = document.getElementById('memoryModal');
   const body = document.getElementById('memoryModalBody');
 
   body.innerHTML = `
-    <p><strong>Contenu:</strong></p>
-    <p>${memory.content}</p>
-    <p class="mt-4"><strong>Catégorie:</strong> ${memory.category}</p>
-    <p><strong>Importance:</strong> ${memory.importance}/10</p>
-    <p><strong>Date:</strong> ${formatDate(memory.createdAt)}</p>
-    <div class="mt-4">
-      <button class="btn btn-danger btn-small" onclick="deleteMemory('${memory.id}')">Supprimer ce souvenir</button>
+    <div class="memory-detail">
+      <p class="memory-detail-content">${memory.content}</p>
+      <div class="memory-detail-meta">
+        <div class="meta-item">
+          <span class="meta-label">Catégorie</span>
+          <span class="meta-value">${categoryLabels[memory.category] || memory.category}</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Importance</span>
+          <span class="meta-value">${memory.importance}/10</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Date</span>
+          <span class="meta-value">${new Date(memory.createdAt).toLocaleDateString('fr-FR', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })}</span>
+        </div>
+      </div>
+      <button class="btn btn-danger btn-small" onclick="deleteMemory('${memory.id}')">
+        Supprimer ce souvenir
+      </button>
     </div>
   `;
 
@@ -532,8 +662,11 @@ function deleteMemory(id) {
 function clearMemories() {
   if (confirm('Effacer tous les souvenirs? Cette action est irréversible.')) {
     memoryManager.clearMemories();
+    state.triggers = [];
+    saveState();
     renderMemories();
-    showNotification('Souvenirs effacés', 'success');
+    renderTriggers();
+    showNotification('Mémoire effacée', 'success');
   }
 }
 

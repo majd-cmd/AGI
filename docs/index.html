@@ -21,9 +21,10 @@
             </div>
             <div class="sidebar-content">
                 <div class="memory-section">
-                    <h3>Souvenirs récents</h3>
+                    <h3>📝 Souvenirs</h3>
+                    <p class="help-text mb-2">Créés automatiquement à partir de vos messages</p>
                     <div id="memoriesList" class="memories-list">
-                        <p class="empty-state">Aucun souvenir pour l'instant...</p>
+                        <p class="empty-state">Les souvenirs apparaîtront ici...</p>
                     </div>
                 </div>
                 <div class="memory-actions">
@@ -92,21 +93,8 @@
                     <p class="help-text">Ta clé reste stockée localement sur ton appareil.</p>
                 </div>
                 <div class="triggers-section">
-                    <h3>⚡ Triggers</h3>
-                    <div class="add-trigger-form">
-                        <input type="text" id="newTriggerWord" placeholder="Mot-clé">
-                        <input type="number" id="newTriggerScore" placeholder="Score (1-10)" min="1" max="10">
-                        <select id="newTriggerCategory">
-                            <option value="personnel">Personnel</option>
-                            <option value="professionnel">Professionnel</option>
-                            <option value="emotions">Émotions</option>
-                            <option value="social">Social</option>
-                            <option value="finance">Finance</option>
-                            <option value="bien-etre">Bien-être</option>
-                            <option value="aspirations">Aspirations</option>
-                        </select>
-                        <button class="btn btn-primary" onclick="addTrigger()">Ajouter</button>
-                    </div>
+                    <h3>🏷️ Mots-clés détectés</h3>
+                    <p class="help-text mb-2">Extraits automatiquement de vos conversations</p>
                     <div id="triggersList" class="triggers-list"></div>
                 </div>
                 <div class="sidebar-footer">
