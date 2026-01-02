@@ -37,16 +37,28 @@ function initApp() {
   updateStatusIndicator();
   checkApiKey();
   autoResizeTextarea();
+
+  // Extract keywords from existing memories if triggers are empty
+  if (state.triggers.length === 0 && memoryManager.getMemories().length > 0) {
+    extractKeywordsFromMemories();
+  }
 }
 
 function loadState() {
   // Load API key
   state.apiKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
 
-  // Load triggers (auto-extracted)
+  // Load triggers (auto-extracted only - filter out old manual triggers)
   try {
     const triggers = localStorage.getItem(STORAGE_KEYS.TRIGGERS);
-    state.triggers = triggers ? JSON.parse(triggers) : [];
+    if (triggers) {
+      const parsed = JSON.parse(triggers);
+      // Only keep triggers that have createdAt (auto-extracted ones)
+      // Old manual triggers don't have this field
+      state.triggers = parsed.filter(t => t.createdAt);
+    } else {
+      state.triggers = [];
+    }
   } catch (e) {
     state.triggers = [];
   }
@@ -501,6 +513,78 @@ function processExtraction(extraction, originalMessage) {
   }
 }
 
+// Extract keywords from existing memories (for migration)
+async function extractKeywordsFromMemories() {
+  const memories = memoryManager.getMemories();
+  if (memories.length === 0 || !state.apiKey) return;
+
+  // Combine all memory content for batch extraction
+  const memoriesText = memories.map(m => `[${m.category}] ${m.content}`).join('\n');
+
+  const extractionPrompt = `Analyse ces souvenirs et extrais TOUS les mots-clés importants (noms de personnes, lieux, activités, préférences).
+
+Souvenirs:
+${memoriesText}
+
+Réponds UNIQUEMENT avec un tableau JSON de mots-clés, avec leur catégorie:
+[
+  {"mot": "exemple", "categorie": "famille|travail|loisirs|sante|preferences|projets|social|lieu|autre"}
+]
+
+Extrais particulièrement:
+- Les prénoms de personnes (famille, amis, collègues)
+- Les noms de lieux (villes, pays, quartiers)
+- Les activités/hobbies
+- Les préférences (couleurs, nourriture, etc.)`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': state.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 512,
+        messages: [{ role: 'user', content: extractionPrompt }]
+      })
+    });
+
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const text = data.content[0].text.trim();
+
+    // Parse JSON array
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      const keywords = JSON.parse(jsonMatch[0]);
+
+      keywords.forEach(kw => {
+        const word = kw.mot.toLowerCase().trim();
+        if (word.length > 2 && !state.triggers.find(t => t.word === word)) {
+          state.triggers.push({
+            word: word,
+            score: 7,
+            category: kw.categorie || 'autre',
+            createdAt: new Date().toISOString()
+          });
+        }
+      });
+
+      if (state.triggers.length > 0) {
+        saveState();
+        renderTriggers();
+      }
+    }
+  } catch (error) {
+    console.error('Keywords extraction error:', error);
+  }
+}
+
 // ============================================================================
 // Triggers Display (Auto-extracted)
 // ============================================================================
@@ -531,6 +615,7 @@ function renderTriggers() {
     preferences: { label: 'Préférences', emoji: '⭐' },
     projets: { label: 'Projets', emoji: '🎯' },
     social: { label: 'Social', emoji: '👥' },
+    lieu: { label: 'Lieux', emoji: '📍' },
     autre: { label: 'Autre', emoji: '📌' }
   };
 
@@ -584,6 +669,7 @@ function renderMemories() {
     preferences: '⭐',
     projets: '🎯',
     social: '👥',
+    lieu: '📍',
     autre: '📌'
   };
 
@@ -614,6 +700,7 @@ function showMemoryDetails(id) {
     preferences: 'Préférences',
     projets: 'Projets',
     social: 'Social',
+    lieu: 'Lieux',
     autre: 'Autre'
   };
 
